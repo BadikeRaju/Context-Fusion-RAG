@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import re
@@ -637,48 +636,25 @@ class MistralRAGChatbot:
         matrix = vectorizer.fit_transform(texts)
         return matrix, vectorizer
 
-    async def get_text_embedding(self, text: str, model: str = EMBEDDING_MODEL):
-        response = await self.client.embeddings.create_async(
+    def get_text_embedding(self, text: str, model: str = EMBEDDING_MODEL):
+        """Sync API — avoids 'Event loop is closed' when calling Mistral repeatedly in Streamlit."""
+        response = self.client.embeddings.create(
             model=model,
             inputs=[text],
         )
         return np.array(response.data[0].embedding, dtype=np.float32)
 
-    async def _generate_chat_response(self, model: str, prompt: str) -> str:
-        """Stream from Mistral; fall back to non-streaming if the stream is empty."""
+    def _generate_chat_response(self, model: str, prompt: str) -> str:
+        """Sync chat API (stable on Streamlit Cloud; no asyncio.run per message)."""
         messages = [{"role": "user", "content": prompt}]
-        response = ""
         try:
-            async_response = await self.client.chat.stream_async(
-                model=model,
-                messages=messages,
-            )
-            async for chunk in async_response:
-                choices = getattr(chunk.data, "choices", None) or []
-                if not choices:
-                    continue
-                delta = getattr(choices[0], "delta", None)
-                content = getattr(delta, "content", None) if delta else None
-                if content:
-                    response += content
-        except Exception as e:
-            logging.warning("Streaming failed, using complete API: %s", e)
-
-        if response.strip():
-            return response.strip()
-
-        try:
-            complete = await self.client.chat.complete_async(
-                model=model,
-                messages=messages,
-            )
-            content = complete.choices[0].message.content
+            result = self.client.chat.complete(model=model, messages=messages)
+            content = result.choices[0].message.content
             if content and content.strip():
                 return content.strip()
         except Exception as e:
-            logging.error("Complete API failed: %s", e)
+            logging.error("Chat complete failed: %s", e)
             raise
-
         raise RuntimeError(
             "Mistral returned an empty response. Check your API key and try again."
         )
@@ -828,12 +804,29 @@ class MistralRAGChatbot:
 
     def _style_instruction(self, response_style: str) -> str:
         style_prompts = {
-            "Detailed": "Give a detailed, practical answer.",
-            "Concise": "Give a short, clear answer.",
-            "Creative": "Give a clear, engaging answer.",
-            "Technical": "Give a precise technical answer.",
+            "Detailed": "Give a detailed, practical answer in 3–6 sentences.",
+            "Concise": "Give a very brief answer in 1–2 sentences only.",
+            "Creative": "Give a clear, engaging answer in 2–4 sentences.",
+            "Technical": "Give a precise technical answer in 3–5 sentences.",
         }
         return style_prompts.get(response_style, style_prompts["Detailed"])
+
+    def _document_section_rules(self, response_style: str) -> str:
+        if response_style == "Concise":
+            return (
+                "Answer in **1–2 short sentences maximum**. State only the direct fact "
+                "the user asked for (e.g. a year, grade, school name, or one project title). "
+                "**Never** paste full bullet lists, long paragraphs, or entire resume blocks."
+            )
+        if response_style == "Detailed":
+            return (
+                "Answer using ONLY the passages. Be specific; you may use a short paragraph "
+                "or a few bullets if needed."
+            )
+        return (
+            "Answer using ONLY the passages. "
+            + self._style_instruction(response_style)
+        )
 
     def _build_dual_section_prompt(
         self,
@@ -850,19 +843,17 @@ class MistralRAGChatbot:
             "### From your uploaded documents\n"
             "### General answer (Mistral AI)\n"
         )
+        doc_rules = self._document_section_rules(response_style)
         if in_documents:
             return (
                 "You are a helpful assistant. The user's question may be answered from "
                 "their uploaded PDF passages below.\n\n"
                 f"{headers}\n"
-                "In **From your uploaded documents**: Answer using ONLY the passages. "
-                "If the passages fully answer the question, put the full answer there. "
-                "If the passages do not contain the answer (or only partly relate), "
-                "clearly state what is NOT in the documents.\n\n"
-                "In **General answer (Mistral AI)**: If the passages did not fully answer "
-                "the question, give a correct, helpful answer using your general knowledge "
-                f"({style}). If the passages fully answered it, write only: "
-                "*Not needed — fully covered in your documents above.*\n\n"
+                f"In **From your uploaded documents**: {doc_rules} "
+                "If the passages do not contain the answer, say so clearly.\n\n"
+                "In **General answer (Mistral AI)**: If the passages fully answered the "
+                f"question, write only: *Not needed — fully covered in your documents above.* "
+                f"Otherwise give a helpful answer ({style}).\n\n"
                 f"--- Passages from PDFs ---\n{context}\n\n"
                 f"--- Question ---\n{user_query}"
             )
@@ -879,7 +870,7 @@ class MistralRAGChatbot:
             f"--- Unrelated excerpts (do NOT use as facts) ---\n{context or '(no text indexed)'}"
         )
 
-    async def generate_response_with_rag(
+    def generate_response_with_rag(
         self,
         user_query: str,
         model: str = "mistral-small-latest",
@@ -889,7 +880,7 @@ class MistralRAGChatbot:
     ):
         retrieval_report = {}
         try:
-            query_embedding = await self.get_text_embedding(user_query)
+            query_embedding = self.get_text_embedding(user_query)
             ranked_chunks, retrieval_report = self.hybrid_retrieve(
                 user_query, query_embedding, top_k
             )
@@ -909,7 +900,7 @@ class MistralRAGChatbot:
                     user_query, response_style, in_documents=False, context=""
                 )
                 retrieval_report["answer_mode"] = "general_only"
-                response = await self._generate_chat_response(model, prompt)
+                response = self._generate_chat_response(model, prompt)
                 return response, [], source_info
 
             relevance = assess_document_relevance(user_query, ranked_chunks[0])
@@ -937,7 +928,7 @@ class MistralRAGChatbot:
                 in_documents=in_documents,
                 context=context,
             )
-            response = await self._generate_chat_response(model, full_prompt)
+            response = self._generate_chat_response(model, full_prompt)
             return response, [doc["text"] for doc in ranked_chunks], source_info
 
         except Exception as e:
@@ -1230,14 +1221,23 @@ def main():
                 )
 
         with st.expander("Advanced settings", expanded=False):
-            model = st.selectbox("Model", ["mistral-small-latest", "mistral-large-latest"])
-            top_k = st.slider("Passages used per answer", 3, 12, 5)
+            model = st.selectbox(
+                "Model",
+                ["mistral-small-latest", "mistral-large-latest"],
+                key="setting_model",
+            )
+            top_k = st.slider(
+                "Passages used per answer", 3, 12, 5, key="setting_top_k"
+            )
             response_style = st.selectbox(
-                "Answer style", ["Detailed", "Concise", "Creative", "Technical"]
+                "Answer style",
+                ["Detailed", "Concise", "Creative", "Technical"],
+                key="setting_response_style",
             )
             add_general_answer = st.checkbox(
                 "General answer when not in documents (recommended)",
                 value=True,
+                key="setting_general_answer",
                 help="If your PDFs do not cover the question: say so clearly, "
                 "then Mistral gives a correct general answer (e.g. sewing, cooking).",
             )
@@ -1260,7 +1260,7 @@ def main():
 
         try:
             with st.spinner("Running hybrid retrieval and generating answer…"):
-                response, _, source_info = asyncio.run(
+                response, _, source_info = (
                     st.session_state.chatbot.generate_response_with_rag(
                         user_message,
                         model=model,
