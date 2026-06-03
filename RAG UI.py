@@ -12,8 +12,11 @@ import dill
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-# Initialize the Mistral client with your API key
-api_key = "pF8jEjjcaJmvAX1nP4jhtLodp3LQxjjV"
+# Use app.py for deployment. This file is kept for reference; set MISTRAL_API_KEY locally.
+import os
+api_key = os.environ.get("MISTRAL_API_KEY", "")
+if not api_key:
+    raise EnvironmentError("Set MISTRAL_API_KEY before running this script.")
 client = Mistral(api_key=api_key)
 
 class MistralRAGChatbot:

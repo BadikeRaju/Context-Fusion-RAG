@@ -33,31 +33,53 @@ Before you run the chatbot, ensure that you have the following:
 - **Required Libraries**: Install the necessary Python libraries using:
 
 ```bash
-pip install numpy pickle streamlit mistralai annoy scikit-learn dill
+pip install -r requirements.txt
 ```
 
-- **Mistral API Key**: Obtain an API key for **Mistral** to generate embeddings and interact with the chatbot's language model.
+For building a vector database from PDFs (optional), also install PyMuPDF:
+
+```bash
+pip install pymupdf
+```
+
+- **Mistral API Key**: Obtain an API key from [Mistral AI](https://console.mistral.ai/). Never commit keys to Git; use Streamlit Secrets or environment variables.
 
 ## Setup and Usage
 
-### 1. **Preparing Vector Database and Annoy Index**
-The chatbot uses a **Vector Database** and an **Annoy Index** for efficient document retrieval. You need to upload these files through the Streamlit interface.
+### 1. **Upload a PDF (end users)**
+Clients only upload a **PDF** in the sidebar. The app automatically extracts text, creates embeddings, builds all retrieval indexes, and enables chat—no `.pkl` or `.ann` files required.
 
-- **Vector Database (PKL)**: A file that contains document embeddings and corresponding texts.
-- **Annoy Index (ANN)**: A file containing the Annoy index built from the document embeddings.
+**Hybrid retrieval (on every question):** Annoy (semantic embeddings) + TF-IDF + BM25 + Word2Vec, fused with reciprocal rank fusion and weighted scoring.
 
-### 2. **Running the Streamlit Application**
-After installing the required dependencies and preparing the vector database and Annoy index, you can launch the chatbot interface by running the following command:
+### 2. **Running the Streamlit Application Locally**
+
+1. Copy the secrets template and add your API key:
+
+```bash
+mkdir -p .streamlit
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# Edit .streamlit/secrets.toml and set MISTRAL_API_KEY
+```
+
+Alternatively, export the key:
+
+```bash
+export MISTRAL_API_KEY="your-key-here"
+```
+
+2. Start the app:
 
 ```bash
 streamlit run app.py
 ```
 
+The legacy entry point `RAG UI.py` is still in the repo; use **`app.py`** for local runs and Streamlit Cloud.
+
 This will start the Streamlit application, where you can:
 
-- Upload the vector database and Annoy index files.
-- Select the model, response style, and number of documents to retrieve (`Top K`).
-- Type your query and interact with the chatbot.
+- Upload a PDF document.
+- Wait while the document is indexed (progress shown in the sidebar).
+- Ask questions about the document.
 
 ### 3. **Using the Chatbot**
 Once the files are loaded, you can start interacting with the chatbot by typing a query in the input box and selecting your desired **response style** and **retrieval settings**:
@@ -78,6 +100,42 @@ You can expand and explore the details of each document used for generating the 
 
 ### 5. **Chat History**
 The Streamlit interface maintains a **chat history** that displays previous interactions. User queries and assistant responses are shown in a conversation-like format.
+
+## Deploy on Streamlit Community Cloud (go live)
+
+1. **Push this repo to GitHub** (if it is not already there).
+
+2. Open [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, and click **New app**.
+
+3. Set:
+   - **Repository**: your `Context-Fusion-RAG` repo
+   - **Branch**: `main` (or your default branch)
+   - **Main file path**: `app.py`
+
+4. Under **Advanced settings**, leave the default install command (`pip install -r requirements.txt`).
+
+5. Open **Settings → Secrets** and add:
+
+```toml
+MISTRAL_API_KEY = "your-mistral-api-key-here"
+```
+
+6. Click **Deploy**. When the app is running, open the public URL, **upload one or more PDFs**, wait for indexing, and start chatting.
+
+**Note:** Uploaded files are processed per browser session (re-upload after restart). Large or many PDFs use more Mistral embedding API credits during indexing. Scanned/image-only pages need OCR—only selectable text is extracted.
+
+### Quick deploy checklist
+
+| Step | Action |
+|------|--------|
+| GitHub | Push `main` with `app.py` and `requirements.txt` |
+| Streamlit Cloud | [share.streamlit.io](https://share.streamlit.io) → **New app** |
+| Main file | `app.py` |
+| Secrets | `MISTRAL_API_KEY = "..."` in app Settings → Secrets |
+
+### Optional: offline index build (`RAG Vector DB.py`)
+
+For batch processing outside Streamlit, you can still run `RAG Vector DB.py` to build `vector_db.pkl` and `vector_index.ann` locally. The main app no longer requires these files.
 
 ## Code Structure
 

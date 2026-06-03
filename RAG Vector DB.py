@@ -11,8 +11,10 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-# Set your API key and model IDs
-api_key = "pF8jEjjcaJmvAX1nP4jhtLodp3LQxjjV"
+# Set your API key via environment variable (never commit keys to git)
+api_key = os.environ.get("MISTRAL_API_KEY")
+if not api_key:
+    raise EnvironmentError("Set MISTRAL_API_KEY before building the vector database.")
 embedding_model = "mistral-embed"  # Replace with the correct model ID
 
 # Initialize the Mistral client
