@@ -7,7 +7,10 @@ import fitz
 import numpy as np
 import streamlit as st
 from annoy import AnnoyIndex
-from mistralai import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:  # mistralai v2.x namespace
+    from mistralai.client import Mistral
 from rank_bm25 import BM25Okapi
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
