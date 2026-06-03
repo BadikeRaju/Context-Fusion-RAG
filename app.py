@@ -35,6 +35,26 @@ METHOD_LABELS = {
 # Hybrid fusion (Step 13): sum of per-method scores (each normalized 0–1 across chunks)
 HYBRID_METHOD_ORDER = ("bm25", "tfidf", "word2vec", "annoy")
 
+# Relevance gate: skip Mistral when the question does not match indexed PDFs
+MIN_HYBRID_SUM_FOR_ANSWER = 1.55  # max possible ≈ 4.0
+MIN_TOKEN_OVERLAP = 0.18  # share of query keywords found in top chunk
+MIN_TOP_TFIDF = 0.11
+MIN_TOP_ANNOY = 0.38
+
+STOPWORDS = frozenset(
+    "a an the is are was were be been being have has had do does did "
+    "will would could should may might must shall can to of in for on "
+    "with at by from as and or but if not this that these those it its "
+    "i you he she they we my your how what when where why who which".split()
+)
+
+NOT_IN_DOCUMENTS_ONLY_MSG = (
+    "**Not found in your uploaded documents.**\n\n"
+    "Your question does not match the content in the PDF(s) you uploaded. "
+    "Enable *General answer when not in documents* in Advanced settings to get a "
+    "Mistral AI answer as well."
+)
+
 
 def get_mistral_api_key() -> str:
     try:
@@ -369,6 +389,92 @@ def build_corpus_from_pdfs(
 def truncate_preview(text: str, max_len: int = 120) -> str:
     t = " ".join(text.split())
     return t[:max_len] + ("…" if len(t) > max_len else "")
+
+
+def query_token_overlap(user_query: str, chunk_text: str) -> float:
+    """Fraction of meaningful query words that appear in the chunk."""
+    tokens = [
+        t
+        for t in re.findall(r"[a-z0-9]+", user_query.lower())
+        if t not in STOPWORDS and len(t) > 2
+    ]
+    if not tokens:
+        return 0.0
+    chunk_lower = chunk_text.lower()
+    hits = sum(1 for t in tokens if t in chunk_lower)
+    return hits / len(tokens)
+
+
+def assess_document_relevance(user_query: str, top_chunk: dict | None) -> dict:
+    """
+    Decide if the question is answerable from uploaded PDFs.
+    Returns dict with passed (bool) and diagnostic scores for the UI.
+    """
+    if not top_chunk:
+        return {
+            "passed": False,
+            "reason": "no_chunks",
+            "hybrid_sum": 0.0,
+            "token_overlap": 0.0,
+            "top_tfidf": 0.0,
+            "top_annoy": 0.0,
+            "top_bm25": 0.0,
+        }
+
+    hybrid_sum = float(top_chunk.get("hybrid_sum", 0))
+    raw = top_chunk.get("raw", {})
+    top_tfidf = float(raw.get("tfidf", 0))
+    top_annoy = float(raw.get("annoy", 0))
+    top_bm25 = float(raw.get("bm25", 0))
+    overlap = query_token_overlap(user_query, top_chunk.get("text", ""))
+
+    # Clear match — allow Mistral
+    strong = (
+        hybrid_sum >= 2.1
+        or overlap >= 0.32
+        or (top_tfidf >= 0.22 and top_annoy >= 0.42)
+        or (top_bm25 >= 2.0 and overlap >= 0.12)
+    )
+    if strong:
+        return {
+            "passed": True,
+            "reason": "strong_match",
+            "hybrid_sum": hybrid_sum,
+            "token_overlap": overlap,
+            "top_tfidf": top_tfidf,
+            "top_annoy": top_annoy,
+            "top_bm25": top_bm25,
+        }
+
+    # Clear mismatch — do not call Mistral (e.g. "boat neck blouse" vs database PDF)
+    weak = (
+        hybrid_sum < MIN_HYBRID_SUM_FOR_ANSWER
+        and overlap < MIN_TOKEN_OVERLAP
+        and top_tfidf < MIN_TOP_TFIDF
+        and top_annoy < MIN_TOP_ANNOY
+    )
+    if weak:
+        return {
+            "passed": False,
+            "reason": "low_relevance",
+            "hybrid_sum": hybrid_sum,
+            "token_overlap": overlap,
+            "top_tfidf": top_tfidf,
+            "top_annoy": top_annoy,
+            "top_bm25": top_bm25,
+        }
+
+    # Borderline: require modest keyword or TF-IDF signal
+    borderline_ok = overlap >= 0.12 or top_tfidf >= 0.16 or hybrid_sum >= 1.85
+    return {
+        "passed": borderline_ok,
+        "reason": "borderline_pass" if borderline_ok else "low_relevance",
+        "hybrid_sum": hybrid_sum,
+        "token_overlap": overlap,
+        "top_tfidf": top_tfidf,
+        "top_annoy": top_annoy,
+        "top_bm25": top_bm25,
+    }
 
 
 def embed_text_chunks(client: Mistral, chunks: list[str], progress_bar, status) -> np.ndarray:
@@ -717,12 +823,66 @@ class MistralRAGChatbot:
         }
         return top_chunks, retrieval_report
 
+    def _style_instruction(self, response_style: str) -> str:
+        style_prompts = {
+            "Detailed": "Give a detailed, practical answer.",
+            "Concise": "Give a short, clear answer.",
+            "Creative": "Give a clear, engaging answer.",
+            "Technical": "Give a precise technical answer.",
+        }
+        return style_prompts.get(response_style, style_prompts["Detailed"])
+
+    def _build_dual_section_prompt(
+        self,
+        user_query: str,
+        response_style: str,
+        *,
+        in_documents: bool,
+        context: str,
+    ) -> str:
+        """Two-part answer: document status + Mistral general knowledge when needed."""
+        style = self._style_instruction(response_style)
+        headers = (
+            "Use exactly these two markdown headers:\n"
+            "### From your uploaded documents\n"
+            "### General answer (Mistral AI)\n"
+        )
+        if in_documents:
+            return (
+                "You are a helpful assistant. The user's question may be answered from "
+                "their uploaded PDF passages below.\n\n"
+                f"{headers}\n"
+                "In **From your uploaded documents**: Answer using ONLY the passages. "
+                "If the passages fully answer the question, put the full answer there. "
+                "If the passages do not contain the answer (or only partly relate), "
+                "clearly state what is NOT in the documents.\n\n"
+                "In **General answer (Mistral AI)**: If the passages did not fully answer "
+                "the question, give a correct, helpful answer using your general knowledge "
+                f"({style}). If the passages fully answered it, write only: "
+                "*Not needed — fully covered in your documents above.*\n\n"
+                f"--- Passages from PDFs ---\n{context}\n\n"
+                f"--- Question ---\n{user_query}"
+            )
+        return (
+            "The user asked a question. Their uploaded PDFs were searched but do NOT "
+            "contain relevant information (retrieval match was too weak). "
+            "Do not pretend the unrelated excerpts answer the question.\n\n"
+            f"{headers}\n"
+            "In **From your uploaded documents**: State clearly in 1–3 sentences that "
+            "this topic is **not covered** in their uploaded PDF(s).\n\n"
+            "In **General answer (Mistral AI)**: Give a correct, helpful, practical "
+            f"answer to the question using your general knowledge. {style}\n\n"
+            f"--- Question ---\n{user_query}\n\n"
+            f"--- Unrelated excerpts (do NOT use as facts) ---\n{context or '(no text indexed)'}"
+        )
+
     async def generate_response_with_rag(
         self,
         user_query: str,
         model: str = "mistral-small-latest",
         top_k: int = 5,
         response_style: str = "Detailed",
+        add_general_answer: bool = True,
     ):
         retrieval_report = {}
         try:
@@ -737,28 +897,43 @@ class MistralRAGChatbot:
             }
 
             if not ranked_chunks:
-                return (
-                    "I could not find relevant passages in your document for that question.",
-                    [],
-                    source_info,
+                retrieval_report["relevance_check"] = assess_document_relevance(
+                    user_query, None
                 )
+                if not add_general_answer:
+                    return NOT_IN_DOCUMENTS_ONLY_MSG, [], source_info
+                prompt = self._build_dual_section_prompt(
+                    user_query, response_style, in_documents=False, context=""
+                )
+                retrieval_report["answer_mode"] = "general_only"
+                response = await self._generate_chat_response(model, prompt)
+                return response, [], source_info
+
+            relevance = assess_document_relevance(user_query, ranked_chunks[0])
+            retrieval_report["relevance_check"] = relevance
+            in_documents = relevance["passed"]
 
             context = "\n\n".join(
                 f"From [{d.get('source_doc', 'document')}]:\n{d['text']}"
                 for d in ranked_chunks[:3]
             )
-            style_prompts = {
-                "Detailed": "Answer using only the passages below. Be specific and cite facts from the document.",
-                "Concise": "Give a short answer using only the passages below.",
-                "Creative": "Answer creatively but stay faithful to the passages below.",
-                "Technical": "Give a precise, technical answer using only the passages below.",
-            }
-            instruction = style_prompts.get(response_style, style_prompts["Detailed"])
-            full_prompt = (
-                f"{context}\n\n"
-                f"Question:\n{user_query}\n\n{instruction}"
-            )
 
+            if not add_general_answer and not in_documents:
+                retrieval_report["answer_blocked"] = True
+                retrieval_report["block_reason"] = (
+                    "Not in your PDFs. Enable general answer in settings for Mistral help."
+                )
+                return NOT_IN_DOCUMENTS_ONLY_MSG, [], source_info
+
+            retrieval_report["answer_mode"] = (
+                "document_plus_general" if in_documents else "not_in_doc_plus_general"
+            )
+            full_prompt = self._build_dual_section_prompt(
+                user_query,
+                response_style,
+                in_documents=in_documents,
+                context=context,
+            )
             response = await self._generate_chat_response(model, full_prompt)
             return response, [doc["text"] for doc in ranked_chunks], source_info
 
@@ -771,7 +946,7 @@ class MistralRAGChatbot:
             )
 
 
-def render_hybrid_retrieval_sources(report: dict):
+def render_hybrid_retrieval_sources(report: dict, key_suffix: str = "0"):
     """UI matching the RAG pipeline: Steps 8–15."""
     st.markdown("##### Pipeline for this question")
     st.markdown(
@@ -781,16 +956,47 @@ def render_hybrid_retrieval_sources(report: dict):
         f"**Total chunks:** {report['total_chunks']}"
     )
 
-    for method in HYBRID_METHOD_ORDER:
-        title = report["step_titles"][method]
-        winner = report["method_winners"][method]
-        with st.expander(title, expanded=(method == "bm25")):
-            st.success(f"Winner: **{winner}**")
-            st.dataframe(
-                report["method_tables"][method],
-                use_container_width=True,
-                hide_index=True,
+    rel = report.get("relevance_check")
+    mode = report.get("answer_mode", "")
+    if mode == "not_in_doc_plus_general":
+        st.info(
+            "Topic **not in your PDFs** — response includes a **general Mistral AI** answer."
+        )
+    elif mode == "document_plus_general":
+        st.success("Matched your documents — document section uses PDF passages.")
+    elif mode == "general_only":
+        st.warning("No indexed text — answer is from Mistral general knowledge only.")
+
+    if rel:
+        if rel.get("passed"):
+            st.caption(
+                f"Relevance: **high** (hybrid={rel['hybrid_sum']:.2f}, "
+                f"keywords={rel['token_overlap']:.0%})"
             )
+        else:
+            st.caption(
+                f"Relevance: **low** (hybrid={rel['hybrid_sum']:.2f}, "
+                f"keywords={rel['token_overlap']:.0%}) — PDFs likely do not cover this question."
+            )
+    if report.get("answer_blocked"):
+        st.error(report.get("block_reason", ""))
+
+    step_options = {
+        report["step_titles"][m]: m for m in HYBRID_METHOD_ORDER
+    }
+    selected_step = st.selectbox(
+        "View retrieval step (Steps 10–13)",
+        options=list(step_options.keys()),
+        index=0,
+        key=f"retrieval_step_{key_suffix}",
+    )
+    method = step_options[selected_step]
+    st.success(f"Winner: **{report['method_winners'][method]}**")
+    st.dataframe(
+        report["method_tables"][method],
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.markdown("##### Step 13 — Hybrid scoring")
     st.code(report["hybrid_formula"], language=None)
@@ -819,7 +1025,7 @@ def render_hybrid_retrieval_sources(report: dict):
 
 
 def render_chat_history():
-    for role, message, source_info in st.session_state.chat_history:
+    for msg_idx, (role, message, source_info) in enumerate(st.session_state.chat_history):
         if role == "user":
             with st.chat_message("user"):
                 st.markdown(message)
@@ -835,9 +1041,18 @@ def render_chat_history():
                     report = source_info.get("retrieval_report")
 
                 if report:
-                    st.markdown("---")
-                    st.markdown("### Retrieval process (hybrid pipeline)")
-                    render_hybrid_retrieval_sources(report)
+                    n_chunks = len(report.get("top_chunks", []))
+                    rel = report.get("relevance_check") or {}
+                    rel_label = "matched PDFs" if rel.get("passed") else "not in PDFs"
+                    mode = report.get("answer_mode", "")
+                    if mode == "not_in_doc_plus_general":
+                        rel_label = "not in PDFs + general AI"
+                    expander_title = (
+                        f"Retrieval process (hybrid pipeline) — "
+                        f"{n_chunks} chunk(s) · {rel_label}"
+                    )
+                    with st.expander(expander_title, expanded=False):
+                        render_hybrid_retrieval_sources(report, key_suffix=str(msg_idx))
 
 
 def main():
@@ -913,6 +1128,7 @@ def main():
     model = "mistral-small-latest"
     top_k = 5
     response_style = "Detailed"
+    add_general_answer = True
 
     with st.sidebar:
         st.header("Your documents")
@@ -1016,6 +1232,12 @@ def main():
             response_style = st.selectbox(
                 "Answer style", ["Detailed", "Concise", "Creative", "Technical"]
             )
+            add_general_answer = st.checkbox(
+                "General answer when not in documents (recommended)",
+                value=True,
+                help="If your PDFs do not cover the question: say so clearly, "
+                "then Mistral gives a correct general answer (e.g. sewing, cooking).",
+            )
 
     if st.session_state.chatbot is None:
         st.info(
@@ -1041,6 +1263,7 @@ def main():
                         model=model,
                         top_k=top_k,
                         response_style=response_style,
+                        add_general_answer=add_general_answer,
                     )
                 )
         except Exception as e:
