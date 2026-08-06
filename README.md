@@ -1,227 +1,323 @@
-# README for MistralRAG Chatbot with Streamlit Interface
+# Context Fusion – RAG-Based Conversational AI Platform
 
-This repository provides the code for a **MistralRAG Chatbot** that combines **Retrieval-Augmented Generation (RAG)** with the **Mistral API** to retrieve relevant documents and generate context-aware responses based on the user's query. The chatbot utilizes advanced retrieval techniques such as **Annoy**, **BM25**, **TF-IDF**, **Word2Vec**, and **semantic similarity**. It integrates **Streamlit**, making it easy for users to upload documents, configure settings, and interact with the chatbot through a web interface.
+> An AI-powered Retrieval-Augmented Generation (RAG) application that enables intelligent conversational search over custom documents using FastAPI, React, and the Mistral API.
 
-The chatbot can be used to query a custom set of documents and generate detailed, concise, creative, or technical responses. It allows users to explore the documents used for generating the responses, showing detailed information about the retrieved documents' similarities.
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
+![React](https://img.shields.io/badge/React-19-blue)
+![License](https://img.shields.io/badge/License-MIT-success)
 
-## Features
-- **Document Retrieval**: The chatbot supports multiple document retrieval methods:
-  - **Annoy**: Approximate Nearest Neighbor search with Annoy for fast retrieval.
-  - **BM25**: A probabilistic model based on term frequency and inverse document frequency.
-  - **TF-IDF**: Term Frequency-Inverse Document Frequency to evaluate the relevance of words.
-  - **Word2Vec**: Uses semantic embeddings for word similarity and context.
-  
-- **Response Generation**: The chatbot uses the **Mistral API** to generate responses based on the retrieved documents. It supports four response styles:
-  - **Detailed**
-  - **Concise**
-  - **Creative**
-  - **Technical**
+---
 
-- **Reranking**: The system reranks retrieved documents based on similarity measures such as **TF-IDF** and **Annoy** to provide the most relevant context for response generation.
+# Overview
 
-- **Streamlit Interface**: 
-  - Upload vector databases and Annoy indices.
-  - Set configuration options like model selection, number of documents to retrieve (`Top K`), and response style.
-  - Interact with the chatbot in a conversational format.
-  - View detailed information about the retrieved documents and their similarities.
+Context Fusion is a full-stack AI application that allows users to upload documents and interact with them through natural language conversations. It combines Retrieval-Augmented Generation (RAG) with hybrid document retrieval techniques to provide accurate, context-aware responses while reducing hallucinations from large language models.
 
-## Prerequisites
+The application is designed for enterprise knowledge retrieval, research assistance, technical documentation search, and intelligent document exploration.
 
-Before you run the chatbot, ensure that you have the following:
+---
 
-- **Python 3.7+**: Ensure you're using a compatible version of Python.
-- **Required Libraries**: Install the necessary Python libraries using:
+# Features
+
+## AI-Powered Conversational Search
+
+- Context-aware responses
+- Natural language question answering
+- Multi-turn conversations
+- Conversation history
+
+---
+
+## Retrieval-Augmented Generation
+
+- Hybrid document retrieval
+- Context injection
+- Prompt construction
+- Response generation
+
+---
+
+## Hybrid Search Engine
+
+Supports multiple retrieval techniques:
+
+- BM25
+- TF-IDF
+- Word2Vec
+- Annoy Vector Search
+
+---
+
+## Document Management
+
+Supported formats
+
+- PDF
+- DOCX
+- TXT
+- Markdown
+
+Features
+
+- Upload documents
+- Delete documents
+- Re-index documents
+- Metadata extraction
+
+---
+
+## AI Features
+
+- Context-aware answers
+- Similarity reranking
+- Source-aware responses
+- Low-latency retrieval
+
+---
+
+# Tech Stack
+
+## Frontend
+
+- React.js
+- React Router
+- Tailwind CSS
+- Axios
+
+## Backend
+
+- Python
+- FastAPI
+- Pydantic
+
+## AI & NLP
+
+- Mistral API
+- BM25
+- TF-IDF
+- Word2Vec
+- Annoy
+
+## Database
+
+- MySQL
+
+## Tools
+
+- Docker
+- Git
+- GitHub
+
+---
+
+# System Architecture
+
+```
+                React.js
+                    │
+              REST API
+                    │
+                FastAPI
+                    │
+        Document Processing
+                    │
+      Hybrid Retrieval Engine
+(BM25 + TF-IDF + Word2Vec + Annoy)
+                    │
+         Similarity Reranking
+                    │
+              Mistral API
+                    │
+              AI Response
+                    │
+                 MySQL
+```
+
+---
+
+# RAG Pipeline
+
+```
+User Query
+     │
+     ▼
+FastAPI
+     │
+     ▼
+Query Processing
+     │
+     ▼
+Hybrid Retrieval
+     │
+     ▼
+Similarity Reranking
+     │
+     ▼
+Relevant Context
+     │
+     ▼
+Mistral API
+     │
+     ▼
+Generated Response
+```
+
+---
+
+# REST APIs
+
+## Documents
+
+```http
+POST   /documents/upload
+GET    /documents
+DELETE /documents/{id}
+POST   /documents/reindex
+```
+
+## Chat
+
+```http
+POST /chat
+GET  /chat/history
+```
+
+## Search
+
+```http
+POST /search
+GET  /search/history
+```
+
+---
+
+# Document Processing Workflow
+
+1. Upload a document.
+2. Extract and preprocess text.
+3. Split content into smaller chunks.
+4. Build BM25, TF-IDF, Word2Vec, and Annoy indexes.
+5. Accept user queries.
+6. Retrieve relevant document chunks.
+7. Rerank retrieved content.
+8. Send contextual prompt to the Mistral API.
+9. Display the generated response.
+
+---
+
+# Installation
+
+## Clone Repository
+
+```bash
+git clone https://github.com/yourusername/context-fusion.git
+cd context-fusion
+```
+
+## Backend
+
+```bash
+python -m venv venv
+```
+
+Activate
+
+Linux/macOS
+
+```bash
+source venv/bin/activate
+```
+
+Windows
+
+```bash
+venv\Scripts\activate
+```
+
+Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For building a vector database from PDFs (optional), also install PyMuPDF:
+Run FastAPI
 
 ```bash
-pip install pymupdf
+uvicorn main:app --reload
 ```
 
-- **Mistral API Key**: Obtain an API key from [Mistral AI](https://console.mistral.ai/). Never commit keys to Git; use Streamlit Secrets or environment variables.
+---
 
-## Setup and Usage
-
-### 1. **Upload a PDF (end users)**
-Clients only upload a **PDF** in the sidebar. The app automatically extracts text, creates embeddings, builds all retrieval indexes, and enables chat—no `.pkl` or `.ann` files required.
-
-**Hybrid retrieval (on every question):** Annoy (semantic embeddings) + TF-IDF + BM25 + Word2Vec, fused with reciprocal rank fusion and weighted scoring.
-
-### 2. **Running the Streamlit Application Locally**
-
-1. Copy the secrets template and add your API key:
+## Frontend
 
 ```bash
-mkdir -p .streamlit
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit .streamlit/secrets.toml and set MISTRAL_API_KEY
+cd frontend
+
+npm install
+
+npm run dev
 ```
 
-Alternatively, export the key:
+---
+
+## Docker
 
 ```bash
-export MISTRAL_API_KEY="your-key-here"
+docker compose up --build
 ```
 
-2. Start the app:
+---
 
-```bash
-streamlit run app.py
-```
+# Future Enhancements
 
-The legacy entry point `RAG UI.py` is still in the repo; use **`app.py`** for local runs and Streamlit Cloud.
+- FAISS Integration
+- Multi-LLM Support
+- Streaming Responses
+- OCR Support
+- Voice-Based Search
+- Document Summarization
+- Citation Generation
+- Feedback-Based Learning
 
-This will start the Streamlit application, where you can:
+---
 
-- Upload a PDF document.
-- Wait while the document is indexed (progress shown in the sidebar).
-- Ask questions about the document.
+# Skills Demonstrated
 
-### 3. **Using the Chatbot**
-Once the files are loaded, you can start interacting with the chatbot by typing a query in the input box and selecting your desired **response style** and **retrieval settings**:
+- Python
+- FastAPI
+- React.js
+- REST APIs
+- MySQL
+- Docker
+- Retrieval-Augmented Generation (RAG)
+- BM25
+- TF-IDF
+- Word2Vec
+- Annoy
+- NLP
+- Semantic Search
+- Backend Development
+- API Design
 
-- **Response Style**: Choose between **Detailed**, **Concise**, **Creative**, or **Technical** responses.
-- **Top K Documents**: Define how many documents you want to retrieve based on their relevance.
+---
 
-After submitting the query, the chatbot will retrieve relevant documents, generate a response, and display the results along with the document details (similarity scores and retrieved text).
+# Use Cases
 
-### 4. **Displaying Results**
-The chatbot provides the following after processing the query:
+- Enterprise Knowledge Bases
+- Research Assistance
+- Technical Documentation Search
+- Customer Support
+- Academic Search
+- Internal Documentation
 
-- **Generated Response**: The context-aware response based on the retrieved documents.
-- **Retrieved Documents**: A preview of the documents used to generate the response.
-- **Similarity Scores**: Displays both **TF-IDF** and **Annoy** similarity scores for each retrieved document.
+---
 
-You can expand and explore the details of each document used for generating the response.
+# License
 
-### 5. **Chat History**
-The Streamlit interface maintains a **chat history** that displays previous interactions. User queries and assistant responses are shown in a conversation-like format.
+This project is licensed under the MIT License.
 
-## Deploy on Streamlit Community Cloud (go live)
+---
 
-1. **Push this repo to GitHub** (if it is not already there).
+# Author
 
-2. Open [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, and click **New app**.
-
-3. Set:
-   - **Repository**: your `Context-Fusion-RAG` repo
-   - **Branch**: `main` (or your default branch)
-   - **Main file path**: `app.py`
-
-4. Under **Advanced settings**, leave the default install command (`pip install -r requirements.txt`).
-
-5. Open **Settings → Secrets** and add:
-
-```toml
-MISTRAL_API_KEY = "your-mistral-api-key-here"
-```
-
-6. Click **Deploy**. When the app is running, open the public URL, **upload one or more PDFs**, wait for indexing, and start chatting.
-
-**Note:** Uploaded files are processed per browser session (re-upload after restart). Large or many PDFs use more Mistral embedding API credits during indexing. Scanned/image-only pages need OCR—only selectable text is extracted.
-
-### Quick deploy checklist
-
-| Step | Action |
-|------|--------|
-| GitHub | Push `main` with `app.py` and `requirements.txt` |
-| Streamlit Cloud | [share.streamlit.io](https://share.streamlit.io) → **New app** |
-| Main file | `app.py` |
-| Secrets | `MISTRAL_API_KEY = "..."` in app Settings → Secrets |
-
-### Optional: offline index build (`RAG Vector DB.py`)
-
-For batch processing outside Streamlit, you can still run `RAG Vector DB.py` to build `vector_db.pkl` and `vector_index.ann` locally. The main app no longer requires these files.
-
-## Code Structure
-
-### Key Components
-- **MistralRAGChatbot Class**:
-  - Handles loading the vector database and Annoy index.
-  - Retrieves documents using **Annoy** and **TF-IDF**.
-  - Generates responses using the Mistral model via the **Mistral API**.
-  - Supports various response styles (Detailed, Concise, Creative, Technical).
-
-- **Streamlit Interface**:
-  - **File Upload**: Upload vector database and Annoy index files.
-  - **Settings**: Select model, response style, and document retrieval options.
-  - **Chat Interface**: Users can type queries, view responses, and explore document details.
-
-### Core Functions:
-1. **Loading Vector Database and Annoy Index**:
-   - `load_vector_db()`: Loads the document embeddings and texts from the vector database.
-   - `load_annoy_index()`: Loads the Annoy index from the provided file.
-
-2. **Document Retrieval**:
-   - `retrieve_documents()`: Retrieves documents using both **Annoy** and **TF-IDF**, combining results from both methods.
-   
-3. **Response Generation**:
-   - `generate_response_with_rag()`: Generates the chatbot's response based on the query and retrieved documents.
-   
-4. **Embedding Generation**:
-   - `get_text_embedding()`: Uses the **Mistral API** to generate embeddings for the user's query.
-
-## Example Interaction
-
-Here is an example interaction with the chatbot:
-
-1. **User**: "What are the side effects of this medication?"
-2. **Chatbot**: Returns a detailed response, such as "The medication includes possible side effects such as dizziness, headaches, and nausea."
-   - Shows the retrieved documents with **TF-IDF** and **Annoy** similarities.
-3. **User**: "Can you tell me more about the dosage?"
-4. **Chatbot**: Returns a concise response based on relevant documents retrieved from the database.
-
-## Streamlit Customizations
-
-### Styling
-The chatbot interface is designed using custom CSS to ensure a clean and modern layout:
-- **Chat Container**: Displays user and assistant messages with distinct styles for clarity.
-- **Fixed Header**: A sticky header at the top to display the title.
-- **User and Assistant Messages**: Messages are visually distinguished, with the user's messages on the right and assistant's on the left.
-
-### File Upload Section
-In the **sidebar**, users can upload:
-- **Vector Database** (PKL): A file containing document embeddings and texts.
-- **Annoy Index** (ANN): A file containing the Annoy index.
-
-### Response Style Options
-You can select one of the following response styles:
-- **Detailed**: A thorough and comprehensive response.
-- **Concise**: A short and to-the-point response.
-- **Creative**: An imaginative response.
-- **Technical**: A detailed and technical response, often with more in-depth explanations.
-
-## Example Output
-
-Here’s how the system will output after querying the chatbot:
-
-```text
-User: "What are the side effects of the medication?"
-
-Assistant (Detailed): "The medication includes possible side effects such as dizziness, headaches, and gastrointestinal discomfort. It is recommended to monitor for any adverse reactions."
-
-Document 1: "Side effects of medication: dizziness, headache, nausea..."
-TF-IDF Similarity: 0.89
-Annoy Similarity: 0.75
-
-Document 2: "Patient has reported headaches after starting the treatment..."
-TF-IDF Similarity: 0.82
-Annoy Similarity: 0.79
-```
-
-## Error Handling
-
-- **File Not Found**: If the vector database or Annoy index files are not found, an error message will be displayed.
-- **Embedding Generation Errors**: If there’s an issue generating embeddings (e.g., network issues with the Mistral API), the chatbot will handle the error gracefully and notify the user.
-  
-## License
-
-This project is licensed under the **MIT License**. See the LICENSE file for more details.
-
-## Conclusion
-
-The **MistralRAG Chatbot** provides an advanced solution for querying documents and generating context-aware responses. By combining **Retrieval-Augmented Generation (RAG)** techniques with **Mistral’s language model**, it allows users to interact with a knowledge base and obtain insightful responses. The Streamlit interface makes the system user-friendly and interactive, providing an easy way to upload documents, configure settings, and explore the results.
+**Raju Badike**
